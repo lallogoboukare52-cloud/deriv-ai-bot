@@ -6,6 +6,7 @@ from ai_engine import AIEngine
 from risk_manager import RiskManager
 from telegram_bot import TelegramInterface
 
+
 class DerivAIBot:
     def __init__(self):
         self.deriv = DerivClient()
@@ -27,19 +28,25 @@ class DerivAIBot:
         await self.deriv.connect()
         self.state['balance'] = self.deriv.balance
         self.risk.set_balance(self.deriv.balance)
-        await self.tg.app.bot.send_message(
-            config.CHAT_ID,
-            f"🤖 *DERIV AI BOT DÉMARRÉ*\n"
-            f"💰 Solde : {self.deriv.balance:.2f} USD\n"
-            f"🧠 Mode : {config.AI_MODE}\n"
-            f"💹 Symbole : {config.ACTIVE_SYMBOL}\n"
-            f"Envoie /start pour le menu !",
-            parse_mode="Markdown"
-        )
-        await asyncio.gather(
-            self.trading_loop(),
-            self.tg.app.run_polling(close_loop=False)
-        )
+
+        async with self.tg.app:
+            await self.tg.app.initialize()
+            await self.tg.app.bot.send_message(
+                config.CHAT_ID,
+                f"🤖 *DERIV AI BOT DÉMARRÉ*\n"
+                f"💰 Solde : {self.deriv.balance:.2f} USD\n"
+                f"🧠 Mode : {config.AI_MODE}\n"
+                f"💹 Symbole : {config.ACTIVE_SYMBOL}\n"
+                f"Envoie /start pour le menu !",
+                parse_mode="Markdown"
+            )
+            await self.tg.app.start()
+            await self.tg.app.updater.start_polling()
+
+            await self.trading_loop()
+
+            await self.tg.app.updater.stop()
+            await self.tg.app.stop()
 
     async def trading_loop(self):
         while True:
@@ -103,9 +110,11 @@ class DerivAIBot:
             trade_info['pnl'] = pnl
             await self.tg.send_alert(trade_info)
 
+
 async def main():
     bot = DerivAIBot()
     await bot.start()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
