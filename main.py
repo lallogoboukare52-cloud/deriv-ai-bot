@@ -38,7 +38,7 @@ class DerivAIBot:
         )
         await asyncio.gather(
             self.trading_loop(),
-            self.tg.app.run_polling()
+            self.tg.app.run_polling(close_loop=False)
         )
 
     async def trading_loop(self):
