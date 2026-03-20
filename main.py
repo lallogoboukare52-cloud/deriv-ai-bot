@@ -1,11 +1,12 @@
 import asyncio
 import datetime
+import os
+from aiohttp import web
 import config
 from deriv_client import DerivClient
 from ai_engine import AIEngine
 from risk_manager import RiskManager
 from telegram_bot import TelegramInterface
-
 
 class DerivAIBot:
     def __init__(self):
@@ -110,8 +111,21 @@ class DerivAIBot:
             trade_info['pnl'] = pnl
             await self.tg.send_alert(trade_info)
 
+async def health_server():
+    async def handle(request):
+        return web.Response(text="Bot OK")
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Serveur HTTP démarré sur le port {port}")
+
 
 async def main():
+    await health_server()
     bot = DerivAIBot()
     await bot.start()
 
