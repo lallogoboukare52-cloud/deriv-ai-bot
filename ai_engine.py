@@ -1,5 +1,5 @@
 import pandas as pd
-import pandas_ta as ta
+import ta
 import numpy as np
 from order_book import OrderBookAnalyzer
 from sr_detector import SRDetector
@@ -12,13 +12,14 @@ class AIEngine:
         self.mode = config.AI_MODE
 
     def detect_regime(self, df):
-        adx_df = ta.adx(df['high'], df['low'], df['close'])
-        adx = adx_df['ADX_14'].iloc[-1]
-        atr = ta.atr(df['high'], df['low'], df['close']).iloc[-1]
-        avg_atr = ta.atr(df['high'], df['low'], df['close']).mean()
-        if adx > 25:
+        adx = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
+        adx_val = adx.adx().iloc[-1]
+        atr = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close']).average_true_range()
+        atr_val = atr.iloc[-1]
+        avg_atr = atr.mean()
+        if adx_val > 25:
             return "TREND"
-        elif atr > avg_atr * 1.5:
+        elif atr_val > avg_atr * 1.5:
             return "SCALP"
         else:
             return "SWING"
@@ -41,21 +42,21 @@ class AIEngine:
             return self._swing_signal(df, latest_tick)
 
     def _trend_signal(self, df, price):
-        ema9 = ta.ema(df['close'], length=9).iloc[-1]
-        ema21 = ta.ema(df['close'], length=21).iloc[-1]
-        ema50 = ta.ema(df['close'], length=50).iloc[-1]
-        adx_df = ta.adx(df['high'], df['low'], df['close'])
-        adx = adx_df['ADX_14'].iloc[-1]
-        dip = adx_df['DMP_14'].iloc[-1]
-        dim = adx_df['DMN_14'].iloc[-1]
-        macd_df = ta.macd(df['close'])
-        macd = macd_df['MACD_12_26_9'].iloc[-1]
-        sig = macd_df['MACDs_12_26_9'].iloc[-1]
+        ema9 = ta.trend.EMAIndicator(df['close'], window=9).ema_indicator().iloc[-1]
+        ema21 = ta.trend.EMAIndicator(df['close'], window=21).ema_indicator().iloc[-1]
+        ema50 = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator().iloc[-1]
+        adx_ind = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
+        adx = adx_ind.adx().iloc[-1]
+        dip = adx_ind.adx_pos().iloc[-1]
+        dim = adx_ind.adx_neg().iloc[-1]
+        macd = ta.trend.MACD(df['close'])
+        macd_val = macd.macd().iloc[-1]
+        sig_val = macd.macd_signal().iloc[-1]
         score = 0
         if ema9 > ema21 > ema50: score += 0.3
         if adx > 25: score += 0.2
         if dip > dim: score += 0.2
-        if macd > sig: score += 0.15
+        if macd_val > sig_val: score += 0.15
         if price > ema9: score += 0.15
         if score >= config.MIN_CONFIDENCE:
             return {"signal": "CALL", "confidence": score, "mode": "TREND", "reason": "EMA+ADX+MACD haussier"}
@@ -63,19 +64,19 @@ class AIEngine:
         if ema9 < ema21 < ema50: score2 += 0.3
         if adx > 25: score2 += 0.2
         if dim > dip: score2 += 0.2
-        if macd < sig: score2 += 0.15
+        if macd_val < sig_val: score2 += 0.15
         if price < ema9: score2 += 0.15
         if score2 >= config.MIN_CONFIDENCE:
             return {"signal": "PUT", "confidence": score2, "mode": "TREND", "reason": "EMA+ADX+MACD baissier"}
         return {"signal": "WAIT", "confidence": 0, "mode": "TREND", "reason": "Pas de signal"}
 
     def _scalp_signal(self, df, price):
-        rsi = ta.rsi(df['close'], length=7).iloc[-1]
+        rsi = ta.momentum.RSIIndicator(df['close'], window=7).rsi().iloc[-1]
         obi = self.ob.get_obi()
         mom = self.ob.get_momentum(5)
-        bb = ta.bbands(df['close'], length=10)
-        bbl = bb['BBL_10_2.0'].iloc[-1]
-        bbu = bb['BBU_10_2.0'].iloc[-1]
+        bb = ta.volatility.BollingerBands(df['close'], window=10)
+        bbl = bb.bollinger_lband().iloc[-1]
+        bbu = bb.bollinger_hband().iloc[-1]
         score_c = 0
         score_p = 0
         if obi > config.OBI_THRESHOLD: score_c += 0.4
@@ -93,11 +94,11 @@ class AIEngine:
         return {"signal": "WAIT", "confidence": 0, "mode": "SCALP", "reason": "Pas de signal"}
 
     def _swing_signal(self, df, price):
-        rsi = ta.rsi(df['close'], length=14).iloc[-1]
-        stoch = ta.stoch(df['high'], df['low'], df['close'])
-        sk = stoch['STOCHk_14_3_3'].iloc[-1]
+        rsi = ta.momentum.RSIIndicator(df['close'], window=14).rsi().iloc[-1]
+        stoch = ta.momentum.StochasticOscillator(df['high'], df['low'], df['close'])
+        sk = stoch.stoch().iloc[-1]
         sr_info = self.sr.is_near_level(price)
-        ema200 = ta.ema(df['close'], length=200).iloc[-1]
+        ema200 = ta.trend.EMAIndicator(df['close'], window=200).ema_indicator().iloc[-1]
         score_c = 0
         score_p = 0
         if rsi < 30: score_c += 0.35
