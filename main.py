@@ -50,10 +50,16 @@ class DerivAIBot:
             await self.tg.app.stop()
 
     async def trading_loop(self):
+        last_trade_time = 0
         while True:
             try:
                 if self.state['running']:
-                    await self.run_cycle()
+                    now = asyncio.get_event_loop().time()
+                    time_since_last = now - last_trade_time
+                    if time_since_last >= config.TRADE_COOLDOWN:
+                        traded = await self.run_cycle()
+                        if traded:
+                            last_trade_time = asyncio.get_event_loop().time()
                 await asyncio.sleep(10)
             except Exception as e:
                 print(f"Erreur trading loop: {e}")
@@ -110,6 +116,7 @@ class DerivAIBot:
             trade_info['won'] = won
             trade_info['pnl'] = pnl
             await self.tg.send_alert(trade_info)
+        return True
 
 async def health_server():
     async def handle(request):
