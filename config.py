@@ -12,10 +12,10 @@ DERIV_DEMO = True
 ACTIVE_SYMBOL = "V75"
 STAKE_AMOUNT = 1.0
 MAX_STAKE = 10.0
-DURATION = 5
-DURATION_UNIT = "t"
+DURATION = 1            # ✅ 1 minute par contrat
+DURATION_UNIT = "m"     # ✅ "m" = minutes (pas "t" ticks)
 MAX_DAILY_LOSS = 0.10
-MAX_DAILY_TRADES = 50
+MAX_DAILY_TRADES = 20   # ✅ réduit à 20 trades max/jour
 RISK_PER_TRADE = 0.02
 
 AI_MODE = "AUTO"
@@ -23,3 +23,4 @@ MIN_CONFIDENCE = 0.65
 CANDLE_TF = 60
 OBI_THRESHOLD = 0.55
 MAX_CONSECUTIVE_LOSS = 3
+TRADE_COOLDOWN = 90     # ✅ 90 secondes entre
