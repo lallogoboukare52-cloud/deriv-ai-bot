@@ -27,7 +27,7 @@ class DerivAIBot:
             "last_confidence": 0.0
         }
 
-    async def start(self):
+    async def init_deriv(self):
         try:
             await self.deriv.connect()
             self.state['balance'] = self.deriv.balance
@@ -41,10 +41,9 @@ class DerivAIBot:
                 f"Envoie /start pour le menu !",
                 parse_mode="Markdown"
             )
+            asyncio.create_task(self.trading_loop())
         except Exception as e:
             logger.error(f"Erreur connexion Deriv: {e}")
-
-        await self.tg.app.run_polling(drop_pending_updates=True)
 
     async def trading_loop(self):
         while True:
@@ -110,9 +109,22 @@ class DerivAIBot:
         except Exception as e:
             logger.error(f"Erreur run_cycle: {e}")
 
+bot = DerivAIBot()
+
+async def post_init(application):
+    await bot.init_deriv()
+
 def main():
-    bot = DerivAIBot()
-    asyncio.run(bot.start())
+    from telegram.ext import ApplicationBuilder
+    app = (
+        ApplicationBuilder()
+        .token(config.TELEGRAM_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+    bot.tg.app = app
+    bot.tg._register_handlers()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
