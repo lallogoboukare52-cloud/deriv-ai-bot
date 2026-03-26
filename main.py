@@ -1,12 +1,14 @@
 import asyncio
 import datetime
-import os
-from aiohttp import web
+import logging
 import config
 from deriv_client import DerivClient
 from ai_engine import AIEngine
 from risk_manager import RiskManager
 from telegram_bot import TelegramInterface
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class DerivAIBot:
     def __init__(self):
@@ -26,12 +28,10 @@ class DerivAIBot:
         }
 
     async def start(self):
-        await self.deriv.connect()
-        self.state['balance'] = self.deriv.balance
-        self.risk.set_balance(self.deriv.balance)
-
-        async with self.tg.app:
-            await self.tg.app.initialize()
+        try:
+            await self.deriv.connect()
+            self.state['balance'] = self.deriv.balance
+            self.risk.set_balance(self.deriv.balance)
             await self.tg.app.bot.send_message(
                 config.CHAT_ID,
                 f"🤖 *DERIV AI BOT DÉMARRÉ*\n"
@@ -41,101 +41,78 @@ class DerivAIBot:
                 f"Envoie /start pour le menu !",
                 parse_mode="Markdown"
             )
-            await self.tg.app.start()
-            await self.tg.app.updater.start_polling()
+        except Exception as e:
+            logger.error(f"Erreur connexion Deriv: {e}")
 
-            await self.trading_loop()
-
-            await self.tg.app.updater.stop()
-            await self.tg.app.stop()
+        await self.tg.app.run_polling(drop_pending_updates=True)
 
     async def trading_loop(self):
-        last_trade_time = 0
         while True:
             try:
                 if self.state['running']:
-                    now = asyncio.get_event_loop().time()
-                    time_since_last = now - last_trade_time
-                    if time_since_last >= config.TRADE_COOLDOWN:
-                        traded = await self.run_cycle()
-                        if traded:
-                            last_trade_time = asyncio.get_event_loop().time()
+                    await self.run_cycle()
                 await asyncio.sleep(10)
             except Exception as e:
-                print(f"Erreur trading loop: {e}")
+                logger.error(f"Erreur trading loop: {e}")
                 await asyncio.sleep(30)
 
     async def run_cycle(self):
-        symbol = self.state['symbol']
         symbols_map = {
             "V10": "R_10", "V25": "R_25", "V50": "R_50",
             "V75": "R_75", "V100": "R_100",
             "BOOM500": "BOOM500", "CRASH500": "CRASH500",
             "STEP": "stpRNG"
         }
+        symbol = self.state['symbol']
         deriv_symbol = symbols_map.get(symbol, "R_75")
-        self.candles = await self.deriv.get_candles(
-            deriv_symbol, count=200, tf=config.CANDLE_TF
-        )
-        if not self.candles:
-            return
-        latest_price = float(self.candles[-1]['close'])
-        result = self.ai.analyze(self.candles, latest_price)
-        self.state['last_signal'] = result['signal']
-        self.state['last_confidence'] = result['confidence']
-        self.state['ai_mode'] = result['mode']
-        if result['signal'] == "WAIT":
-            return
-        can, reason = self.risk.can_trade(result['confidence'])
-        if not can:
-            print(f"Trade bloque: {reason}")
-            return
-        balance = await self.deriv.get_balance()
-        self.state['balance'] = balance
-        stake = self.risk.calc_stake(balance)
-        trade_info = {
-            "type": result['signal'],
-            "symbol": symbol,
-            "mode": result['mode'],
-            "stake": stake,
-            "confidence": result['confidence'],
-            "reason": result['reason'],
-            "time": datetime.datetime.now().strftime("%H:%M:%S"),
-            "won": None
-        }
-        await self.tg.send_alert(trade_info)
-        buy_result = await self.deriv.buy_contract(
-            result['signal'], stake,
-            config.DURATION, deriv_symbol
-        )
-        if buy_result:
-            won = buy_result.get('profit', 0) > 0
-            pnl = float(buy_result.get('profit', 0))
-            self.risk.record_trade(won, pnl)
-            self.state['daily_pnl'] += pnl
-            trade_info['won'] = won
-            trade_info['pnl'] = pnl
+        try:
+            self.candles = await self.deriv.get_candles(
+                deriv_symbol, count=200, tf=config.CANDLE_TF
+            )
+            if not self.candles:
+                return
+            latest_price = float(self.candles[-1]['close'])
+            result = self.ai.analyze(self.candles, latest_price)
+            self.state['last_signal'] = result['signal']
+            self.state['last_confidence'] = result['confidence']
+            self.state['ai_mode'] = result['mode']
+            if result['signal'] == "WAIT":
+                return
+            can, reason = self.risk.can_trade(result['confidence'])
+            if not can:
+                return
+            balance = await self.deriv.get_balance()
+            self.state['balance'] = balance
+            stake = self.risk.calc_stake(balance)
+            trade_info = {
+                "type": result['signal'],
+                "symbol": symbol,
+                "mode": result['mode'],
+                "stake": stake,
+                "confidence": result['confidence'],
+                "reason": result['reason'],
+                "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                "won": None
+            }
             await self.tg.send_alert(trade_info)
-        return True
+            buy_result = await self.deriv.buy_contract(
+                result['signal'], stake,
+                config.DURATION, deriv_symbol
+            )
+            if buy_result:
+                won = float(buy_result.get('profit', 0)) > 0
+                pnl = float(buy_result.get('profit', 0))
+                self.risk.record_trade(won, pnl)
+                self.state['daily_pnl'] += pnl
+                trade_info['won'] = won
+                trade_info['pnl'] = pnl
+                await self.tg.send_alert(trade_info)
+        except Exception as e:
+            logger.error(f"Erreur run_cycle: {e}")
 
-async def health_server():
-    async def handle(request):
-        return web.Response(text="Bot OK")
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"Serveur HTTP démarré sur le port {port}")
-
-
-async def main():
-    await health_server()
+def main():
     bot = DerivAIBot()
-    await bot.start()
-
+    asyncio.run(bot.start())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
